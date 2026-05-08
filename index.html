@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ink Battle - Cyber Realism</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&family=Noto+Sans+JP:wght@300;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-orange: #ff6a00;
+        }
+        body { margin: 0; overflow: hidden; background-color: #020205; font-family: 'Noto Sans JP', sans-serif; user-select: none; color: white; }
+        canvas { display: block; }
+
+        /* UI Overlay Styling */
+        #hud {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            padding: 30px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            background: radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.4) 100%);
+        }
+
+        .sci-fi-panel {
+            background: rgba(0, 10, 20, 0.7);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            border-left: 4px solid var(--neon-blue);
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sci-fi-panel::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, var(--neon-blue), transparent);
+        }
+
+        .ink-meter {
+            width: 280px; height: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 0;
+            margin-top: 10px;
+            position: relative;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        #ink-fill {
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, #0084ff, #00f2ff);
+            box-shadow: 0 0 15px var(--neon-blue);
+            transition: width 0.1s linear;
+        }
+
+        .stats-font { font-family: 'Orbitron', sans-serif; }
+        
+        .crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 44px; height: 44px;
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .crosshair-inner {
+            position: absolute; top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: var(--neon-blue);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px var(--neon-blue);
+        }
+
+        #kill-feed {
+            position: absolute; top: 50%; right: 30px;
+            transform: translateY(-50%);
+            display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .glitch-text { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <!-- Top Section -->
+        <div class="flex justify-between items-start">
+            <div class="sci-fi-panel">
+                <div class="flex items-center gap-3">
+                    <div class="text-[10px] tracking-[0.3em] font-black text-cyan-400 uppercase">System Status</div>
+                    <div id="connection-light" class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]"></div>
+                </div>
+                <div class="stats-font text-2xl font-black mt-1 uppercase flex items-baseline gap-2">
+                    INK TANK <span id="ink-val" class="text-sm text-cyan-500">100%</span>
+                </div>
+                <div class="ink-meter">
+                    <div id="ink-fill"></div>
+                </div>
+                <div id="mode-text" class="text-[10px] mt-2 text-white/50 font-bold uppercase tracking-widest">Active / Humanoid</div>
+            </div>
+
+            <div class="flex gap-6">
+                <div class="sci-fi-panel !border-l-0 !border-r-4 !border-r-cyan-400 text-right min-w-[150px]">
+                    <div class="text-[10px] tracking-widest text-gray-400 font-bold uppercase">Territory Blue</div>
+                    <div class="stats-font text-4xl font-black text-cyan-400" id="score-blue">0%</div>
+                </div>
+                <div class="sci-fi-panel !border-l-0 !border-r-4 !border-r-orange-500 text-right min-w-[150px]">
+                    <div class="text-[10px] tracking-widest text-gray-400 font-bold uppercase">Territory Orange</div>
+                    <div class="stats-font text-4xl font-black text-orange-500" id="score-orange">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Section -->
+        <div class="flex justify-center mb-10">
+            <div id="hint" class="bg-black/80 px-6 py-2 border border-white/10 text-[11px] tracking-[0.2em] uppercase text-white/60">
+                Initialization Complete. Click to engage interface.
+            </div>
+        </div>
+    </div>
+
+    <div class="crosshair"><div class="crosshair-inner"></div></div>
+
+    <script>
+        // --- ⚙️ ゲーム設定 ⚙️ ---
+        const CONFIG = {
+            WORLD_SIZE: 160,
+            GRID: 80, // 高解像度グリッド
+            BLUE: 0x00f2ff,
+            ORANGE: 0xff6a00,
+            PLAYER_SPEED: 0.32,
+            SQUID_SPEED: 0.65,
+            SHOT_COST: 4.5,
+            RECOVERY_SQUID: 1.8,
+            RECOVERY_HUMAN: 0.1,
+            BUILDINGS: 45
+        };
+
+        let scene, camera, renderer, player, enemyDrone;
+        let keys = {}, mouse = { down: false, x: 0, y: 0 };
+        let ink = 100, isSquid = false;
+        let gridMap = {}; // "x_z": color
+        let projectiles = [], particles = [];
+
+        // 🚀 初期化
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x010103);
+            scene.fog = new THREE.FogExp2(0x010103, 0.04);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            renderer.toneMappingExposure = 1.5;
+            document.body.appendChild(renderer.domElement);
+
+            // ライティング
+            const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+            scene.add(ambient);
+
+            const moonlight = new THREE.DirectionalLight(0x8090ff, 1.2);
+            moonlight.position.set(40, 80, 40);
+            moonlight.castShadow = true;
+            moonlight.shadow.mapSize.width = 2048;
+            moonlight.shadow.mapSize.height = 2048;
+            scene.add(moonlight);
+
+            // 床 (アスファルト風)
+            const floorGeo = new THREE.PlaneGeometry(CONFIG.WORLD_SIZE, CONFIG.WORLD_SIZE);
+            const floorMat = new THREE.MeshStandardMaterial({ 
+                color: 0x050508, roughness: 0.8, metalness: 0.4 
+            });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // 都市景観
+            createCity();
+
+            // プレイヤー
+            player = createUnit(CONFIG.BLUE);
+            scene.add(player);
+
+            // 敵ドローン
+            enemyDrone = createUnit(CONFIG.ORANGE);
+            enemyDrone.position.set(40, 0, -40);
+            scene.add(enemyDrone);
+
+            // リスナー
+            window.addEventListener('keydown', e => keys[e.code] = true);
+            window.addEventListener('keyup', e => keys[e.code] = false);
+            window.addEventListener('mousedown', () => mouse.down = true);
+            window.addEventListener('mouseup', () => mouse.down = false);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onResize);
+            document.addEventListener('click', () => {
+                renderer.domElement.requestPointerLock();
+                document.getElementById('hint').style.display = 'none';
+            });
+        }
+
+        function createCity() {
+            const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+            for(let i=0; i<CONFIG.BUILDINGS; i++) {
+                const h = 15 + Math.random() * 50;
+                const w = 6 + Math.random() * 12;
+                const mat = new THREE.MeshStandardMaterial({ color: 0x020204, roughness: 0.2 });
+                const b = new THREE.Mesh(boxGeo, mat);
+                
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 70 + Math.random() * 60;
+                b.position.set(Math.cos(angle)*radius, h/2, Math.sin(angle)*radius);
+                b.scale.set(w, h, w);
+                b.castShadow = true;
+                b.receiveShadow = true;
+                scene.add(b);
+
+                // ネオン装飾
+                if(Math.random() > 0.4) {
+                    const neonGeo = new THREE.PlaneGeometry(w*0.8, 0.5);
+                    const color = Math.random() > 0.5 ? CONFIG.BLUE : 0xff00ff;
+                    const neonMat = new THREE.MeshBasicMaterial({ color: color });
+                    const n = new THREE.Mesh(neonGeo, neonMat);
+                    n.position.set(b.position.x, Math.random()*h, b.position.z + w/2 + 0.1);
+                    scene.add(n);
+                    
+                    const pLight = new THREE.PointLight(color, 2, 15);
+                    pLight.position.copy(n.position);
+                    scene.add(pLight);
+                }
+            }
+        }
+
+        function createUnit(color) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: color, emissive: color, emissiveIntensity: 1.5, roughness: 0.1, metalness: 0.8
+            });
+            // サイバーカプセル
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 1.6, 12), mat);
+            body.position.y = 0.8;
+            body.castShadow = true;
+            group.add(body);
+
+            const visor = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 0.2, 0.3),
+                new THREE.MeshBasicMaterial({ color: 0xffffff })
+            );
+            visor.position.set(0, 1.3, 0.4);
+            group.add(visor);
+
+            return group;
+        }
+
+        function onMouseMove(e) {
+            if (document.pointerLockElement) {
+                mouse.x -= e.movementX * 0.0025;
+                mouse.y -= e.movementY * 0.0025;
+                mouse.y = Math.max(-0.6, Math.min(0.2, mouse.y));
+            }
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function paint(x, z, team) {
+            const step = CONFIG.WORLD_SIZE / CONFIG.GRID;
+            const gx = Math.round((x + CONFIG.WORLD_SIZE/2) / step);
+            const gz = Math.round((z + CONFIG.WORLD_SIZE/2) / step);
+            const key = `${gx}_${gz}`;
+
+            if(gridMap[key] !== team) {
+                gridMap[key] = team;
+                const inkGeo = new THREE.PlaneGeometry(step * 1.5, step * 1.5);
+                const inkMat = new THREE.MeshStandardMaterial({ 
+                    color: team, metalness: 0.6, roughness: 0.1, transparent: true, opacity: 0.9 
+                });
+                const mesh = new THREE.Mesh(inkGeo, inkMat);
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.set(gx * step - CONFIG.WORLD_SIZE/2, 0.05, gz * step - CONFIG.WORLD_SIZE/2);
+                scene.add(mesh);
+                updateUI();
+            }
+        }
+
+        function fire(team) {
+            if(ink < CONFIG.SHOT_COST) return;
+            ink -= CONFIG.SHOT_COST;
+
+            const dir = new THREE.Vector3(0, 0, -1)
+                .applyAxisAngle(new THREE.Vector3(1,0,0), mouse.y)
+                .applyAxisAngle(new THREE.Vector3(0,1,0), mouse.x);
+
+            const shot = new THREE.Mesh(
+                new THREE.SphereGeometry(0.4, 8, 8),
+                new THREE.MeshBasicMaterial({ color: team })
+            );
+            shot.position.copy(player.position).add(new THREE.Vector3(0, 1.4, 0));
+            scene.add(shot);
+
+            const light = new THREE.PointLight(team, 10, 15);
+            shot.add(light);
+
+            projectiles.push({ mesh: shot, dir: dir.multiplyScalar(1.4), team, life: 100 });
+        }
+
+        function explode(pos, team) {
+            for(let i=0; i<12; i++) {
+                const p = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.2, 0.2, 0.2),
+                    new THREE.MeshBasicMaterial({ color: team })
+                );
+                p.position.copy(pos);
+                scene.add(p);
+                particles.push({
+                    mesh: p,
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.6, Math.random()*0.6, (Math.random()-0.5)*0.6),
+                    life: 1.0
+                });
+            }
+        }
+
+        function updateUI() {
+            let b=0, o=0;
+            for(let k in gridMap) { if(gridMap[k] === CONFIG.BLUE) b++; else o++; }
+            const total = CONFIG.GRID * CONFIG.GRID;
+            document.getElementById('score-blue').innerText = Math.floor((b/total)*100) + "%";
+            document.getElementById('score-orange').innerText = Math.floor((o/total)*100) + "%";
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const t = Date.now() * 0.001;
+
+            // プレイヤー状態
+            isSquid = keys['ShiftLeft'] || keys['ShiftRight'];
+            player.scale.set(1, isSquid ? 0.2 : 1, 1);
+            player.position.y = isSquid ? -0.3 : 0;
+            
+            document.getElementById('mode-text').innerText = isSquid ? "Active / Stealth Dive" : "Active / Humanoid";
+            document.getElementById('mode-text').style.color = isSquid ? "#ffee00" : "rgba(255,255,255,0.5)";
+
+            // 移動
+            let vel = new THREE.Vector3();
+            if(keys['KeyW']) vel.z -= 1;
+            if(keys['KeyS']) vel.z += 1;
+            if(keys['KeyA']) vel.x -= 1;
+            if(keys['KeyD']) vel.x += 1;
+
+            if(vel.length() > 0) {
+                vel.normalize().applyAxisAngle(new THREE.Vector3(0,1,0), mouse.x);
+                player.position.addScaledVector(vel, isSquid ? CONFIG.SQUID_SPEED : CONFIG.PLAYER_SPEED);
+                player.rotation.y = mouse.x + Math.atan2(vel.x, vel.z);
+                if(isSquid) paint(player.position.x, player.position.z, CONFIG.BLUE);
+            }
+
+            // 射撃
+            if(mouse.down && !isSquid) {
+                fire(CONFIG.BLUE);
+                mouse.down = false; // セミオート
+            }
+
+            // インク回復
+            ink = Math.min(100, ink + (isSquid ? CONFIG.RECOVERY_SQUID : CONFIG.RECOVERY_HUMAN));
+            document.getElementById('ink-fill').style.width = ink + "%";
+            document.getElementById('ink-val').innerText = Math.floor(ink) + "%";
+
+            // 弾丸
+            for(let i=projectiles.length-1; i>=0; i--) {
+                const p = projectiles[i];
+                p.mesh.position.add(p.dir);
+                p.dir.y -= 0.04; // 重力
+                if(p.mesh.position.y <= 0) {
+                    paint(p.mesh.position.x, p.mesh.position.z, p.team);
+                    explode(p.mesh.position, p.team);
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            // 火花
+            for(let i=particles.length-1; i>=0; i--) {
+                const p = particles[i];
+                p.mesh.position.add(p.vel);
+                p.vel.y -= 0.02;
+                p.life -= 0.02;
+                p.mesh.scale.setScalar(p.life);
+                if(p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                }
+            }
+
+            // 敵AI (徘徊)
+            enemyDrone.position.x = Math.sin(t * 0.5) * 45;
+            enemyDrone.position.z = Math.cos(t * 0.3) * 45;
+            if(Math.random() < 0.1) paint(enemyDrone.position.x, enemyDrone.position.z, CONFIG.ORANGE);
+
+            // カメラ追従
+            const camDist = 9;
+            const camOffset = new THREE.Vector3(0, isSquid ? 2 : 4, camDist)
+                .applyAxisAngle(new THREE.Vector3(1, 0, 0), mouse.y)
+                .applyAxisAngle(new THREE.Vector3(0, 1, 0), mouse.x);
+            camera.position.copy(player.position).add(camOffset);
+            camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1, 0)));
+
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
